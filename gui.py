@@ -4,8 +4,26 @@ from tkinter import filedialog
 from tkintermapview import TkinterMapView
 from PIL import Image, ImageTk
 import geocoder
+import image_processing as img_processing
 
 customtkinter.set_default_color_theme("blue")
+
+
+def process_image(uploaded_image_path):
+    k = 3
+    border_size = 2
+    min_points_per_edge = 50
+    max_dist_betw_points = 5
+    min_section_size = 10
+    waypoints_output_filename = 'image_waypoints.txt'
+    img_rgb = img_processing.s0_prepare_img(uploaded_image_path, border_size=border_size, display=False)
+    img_reduced_rgb = img_processing.s1_reduce_img_rgbs(img_rgb, k=k, display=False)
+
+    img_edges = img_processing.s2_generate_edges(img_reduced_rgb, display=False)
+    grouped_edges = img_processing.s3_group_edges(img_edges, edge_threshold=min_points_per_edge)
+    ordered_edges = img_processing.s4_order_edges(grouped_edges, dist_thresh=max_dist_betw_points, section_size_thresh=min_section_size)
+    simplified_paths = img_processing.s5_simplify_path(ordered_edges, epsilon=1.4)
+    img_processing.s6_generate_output(simplified_paths, waypoints_output_filename)
 
 
 class RobotPainterGUI(customtkinter.CTk):
@@ -23,6 +41,7 @@ class RobotPainterGUI(customtkinter.CTk):
         self.start_location_marker = None
         self.start_location = None  # Stores the chosen starting lat/lon
         self.cartesian_points = []  # Stores the (x, y) coordinates
+        self.path_coordinates = []  # Stores the lat/lon coordinates
         self.marker_list = []
 
         self.grid_columnconfigure(0, weight=0)
@@ -36,26 +55,30 @@ class RobotPainterGUI(customtkinter.CTk):
         self.frame_right.grid(row=0, column=1, pady=0, padx=0, sticky="nsew")
 
         self.load_coords_btn = customtkinter.CTkButton(master=self.frame_left, text="Load Coordinates", command=self.load_cartesian_coordinates)
-        self.load_coords_btn.grid(row=0, column=0, padx=20, pady=(20, 10))
+        self.load_coords_btn.grid(row=0, column=0, padx=20, pady=(10, 10))
+
+        self.process_image_btn = customtkinter.CTkButton(master=self.frame_left, text="Process Image", command=self.select_and_process_image)
+        self.process_image_btn.grid(row=2, column=0, padx=20, pady=(10, 10))
+
 
         self.clear_path_btn = customtkinter.CTkButton(master=self.frame_left, text="Clear Path", command=self.clear_path)
-        self.clear_path_btn.grid(row=1, column=0, padx=20, pady=(10, 20))
+        self.clear_path_btn.grid(row=1, column=0, padx=20, pady=(10, 10))
 
         # Tile Server Option Menu
         self.map_label = customtkinter.CTkLabel(self.frame_left, text="Tile Server:")
-        self.map_label.grid(row=2, column=0, padx=20, pady=(20, 0))
+        self.map_label.grid(row=2, column=0, padx=20, pady=(10, 0))
 
         self.map_option_menu = customtkinter.CTkOptionMenu(
             self.frame_left, values=["OpenStreetMap", "Google normal", "Google satellite"], command=self.change_map)
-        self.map_option_menu.grid(row=3, column=0, padx=20, pady=(10, 20))
+        self.map_option_menu.grid(row=3, column=0, padx=20, pady=(10, 10))
         self.map_option_menu.set("OpenStreetMap")
 
         self.appearance_mode_label = customtkinter.CTkLabel(self.frame_left, text="Appearance Mode:")
-        self.appearance_mode_label.grid(row=4, column=0, padx=20, pady=(20, 0))
+        self.appearance_mode_label.grid(row=4, column=0, padx=20, pady=(10, 0))
 
         self.appearance_mode_optionemenu = customtkinter.CTkOptionMenu(
             self.frame_left, values=["Light", "Dark"], command=self.change_appearance_mode)
-        self.appearance_mode_optionemenu.grid(row=5, column=0, padx=20, pady=(10, 20))
+        self.appearance_mode_optionemenu.grid(row=5, column=0, padx=20, pady=(10, 10))
         self.appearance_mode_optionemenu.set("Dark")
 
         self.map_widget = TkinterMapView(self.frame_right, corner_radius=0)
@@ -74,6 +97,10 @@ class RobotPainterGUI(customtkinter.CTk):
             master=self.frame_left, text="Simulate Robot", command=self.simulate_robot_movement
         )
         self.move_robot_btn.grid(row=8, column=0, padx=20, pady=(10, 20))
+
+        self.process_image_btn = customtkinter.CTkButton(master=self.frame_left, text="Process Image", command=self.select_and_process_image)
+        self.process_image_btn.grid(row=2, column=0, padx=20, pady=(10, 10))
+
 
        
 
@@ -108,13 +135,13 @@ class RobotPainterGUI(customtkinter.CTk):
             self.plot_coordinates_on_map()
 
     def simulate_robot_movement(self):
-        if not self.path_points:
+        if not self.path_coordinates:
             print("No polyline to follow. Load or plot a path first!")
             return
 
         self.robot_marker = self.map_widget.set_marker(
-            self.path_points[0][0],
-            self.path_points[0][1],
+            self.path_coordinates[0][0],
+            self.path_coordinates[0][1],
             text="Robot",
             marker_color_circle="red",
             marker_color_outside="black",
@@ -123,9 +150,8 @@ class RobotPainterGUI(customtkinter.CTk):
 
     def move_robot_along_path(self, index):
         """Move the robot marker along the polyline."""
-        if index < len(self.path_points):
-            lat, lon = self.path_points[index]
-            
+        if index < len(self.path_coordinates):
+            lat, lon = self.path_coordinates[index]
             self.robot_marker.set_position(lat, lon)
             
             self.after(500, self.move_robot_along_path, index + 1) 
@@ -143,6 +169,7 @@ class RobotPainterGUI(customtkinter.CTk):
         for x, y in self.cartesian_points:
             lat = start_lat - (y * 0.0000015) 
             lon = start_lon + (x * 0.0000015)  
+            self.path_coordinates.append((lat, lon))
             polyline_points.append((lat, lon))  
 
         if polyline_points:
@@ -150,6 +177,7 @@ class RobotPainterGUI(customtkinter.CTk):
 
     def clear_path(self):
         self.cartesian_points.clear()
+        self.path_coordinates.clear()
         self.map_widget.delete_all_marker()
         self.map_widget.delete_all_path()
 
@@ -166,6 +194,14 @@ class RobotPainterGUI(customtkinter.CTk):
             self.map_widget.set_tile_server("https://mt0.google.com/vt/lyrs=m&hl=en&x={x}&y={y}&z={z}&s=Ga", max_zoom=22)
         elif new_map == "Google satellite":
             self.map_widget.set_tile_server("https://mt0.google.com/vt/lyrs=s&hl=en&x={x}&y={y}&z={z}&s=Ga", max_zoom=22)
+
+    def select_and_process_image(self):
+        """Open a file dialog to select an image and process it."""
+        file_path = filedialog.askopenfilename(filetypes=[("Image files", "*.jpg;*.png;*.jpeg")])
+        if file_path:
+            process_image(file_path)
+            print(f"Processed image: {file_path}")
+
 
     def start(self):
         self.mainloop()
