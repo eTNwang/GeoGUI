@@ -129,10 +129,17 @@ class RobotPainterGUI(customtkinter.CTk):
             self.cartesian_points.clear()
             with open(file_path, "r") as file:
                 for line in file:
-                    print(line, "line")
                     x, y = map(float, line.strip().split(" "))
                     self.cartesian_points.append((x, y))
             self.plot_coordinates_on_map()
+
+    def load_coordinates_triple(self,file_path):
+        self.cartesian_points.clear()
+        with open(file_path, "r") as file:
+            for line in file:
+                x, y, z = map(float, line.strip().split(", "))
+                self.cartesian_points.append((x, y))
+        self.plot_coordinates_on_map()
 
     def simulate_robot_movement(self):
         if not self.path_coordinates:
@@ -201,6 +208,7 @@ class RobotPainterGUI(customtkinter.CTk):
         if file_path:
             process_image(file_path)
             print(f"Processed image: {file_path}")
+            self.load_coordinates_triple("image_waypoints.txt")
 
 
     def start(self):
