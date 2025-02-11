@@ -197,7 +197,7 @@ class RobotPainterGUI(customtkinter.CTk):
 
     def select_and_process_image(self):
         """Open a file dialog to select an image and process it."""
-        file_path = filedialog.askopenfilename(filetypes=[("Image files", "*.jpg;*.png;*.jpeg")])
+        file_path = filedialog.askopenfilename(filetypes=[("Image files", "*.jpg *.png *.jpeg")])
         if file_path:
             process_image(file_path)
             print(f"Processed image: {file_path}")
